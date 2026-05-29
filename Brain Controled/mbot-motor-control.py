@@ -57,7 +57,7 @@ try:
     while True:
         try:
             with open("motor_command.txt", "r") as f:
-                command = f.read().strip().lower()
+                command = f.read().strip().lower().split(',')[0]
         except FileNotFoundError:
             command = None
 
