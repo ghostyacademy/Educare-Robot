@@ -1,0 +1,15 @@
+Address : 10:A5:62:E3:47:E6
+
+Properties: ['read', 'write-without-response']
+  Characteristic: 0000ffe7-0000-1000-8000-00805f9b34fb
+  Properties: ['read', 'write-without-response']
+  Characteristic: 0000ffe8-0000-1000-8000-00805f9b34fb
+  Properties: ['read', 'write-without-response']
+  Characteristic: 0000ffe9-0000-1000-8000-00805f9b34fb
+  Properties: ['read', 'write-without-response']
+  Characteristic: 0000ffea-0000-1000-8000-00805f9b34fb
+  Properties: ['read', 'write-without-response']
+  Characteristic: 0000ffeb-0000-1000-8000-00805f9b34fb
+  Properties: ['read', 'write-without-response']
+  Characteristic: 0000ffec-0000-1000-8000-00805f9b34fb
+  Properties: ['read']
