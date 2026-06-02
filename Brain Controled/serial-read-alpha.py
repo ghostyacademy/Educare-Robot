@@ -35,8 +35,8 @@ CONFIRM_COUNT = 3              # require N consecutive same-zone readings to act
 # STOP when alpha <  THRESHOLD - HYSTERESIS   (eyes open   = low alpha)
 # HOLD (no change)   when alpha is in the dead band
 #
-THRESHOLD  = 111.7            # midpoint between eyes-closed and eyes-open mean
-HYSTERESIS = 48.99             # dead band on each side of the midpoint
+THRESHOLD  = 11.12            # midpoint between eyes-closed and eyes-open mean
+HYSTERESIS = 0.61             # dead band on each side of the midpoint
 
 # ── Parse CLI args ─────────────────────────────────────────────────────────────
 args           = sys.argv[1:]
@@ -217,6 +217,13 @@ try:
         filtered        = apply_filter(np.array(data_buffer), lowcut, highcut, sampling_rate)
         alpha_amplitude = np.sqrt(np.mean(filtered ** 2))
 
+        # Artifact rejection: spikes > 4× threshold are almost certainly
+        # movement or electrode noise, not real brain signal — skip them.
+        artifact_limit = THRESHOLD * 4
+        if alpha_amplitude > artifact_limit:
+            print(f"ARTFCT  alpha={alpha_amplitude:.1f}  (movement artifact — ignored)")
+            continue
+
         # Determine which zone we are in
         if alpha_amplitude > go_line:
             zone = "go"
@@ -224,11 +231,18 @@ try:
             zone = "stop"
         else:
             zone = "hold"
-            pending_count = 0   # reset streak when signal is ambiguous
 
-        # Confirmation: the zone must persist for CONFIRM_COUNT readings in a
-        # row before the command actually changes. One spike does nothing.
-        if zone != "hold":
+        # Confirmation: only count toward a change when the zone differs from
+        # the current command. If we are already in the right state, reset the
+        # pending counter so it starts fresh on the next potential change.
+        if zone == "hold":
+            pending_count = 0
+        elif zone == current_command:
+            # Already in this state — nothing to do, keep counter clean
+            pending_count = 0
+            pending_command = zone
+        else:
+            # Trying to change — accumulate consecutive same-zone readings
             if zone == pending_command:
                 pending_count += 1
             else:
@@ -237,9 +251,11 @@ try:
 
             if pending_count >= CONFIRM_COUNT:
                 current_command = zone
-                pending_count   = 0   # reset so next change also needs N readings
+                pending_count   = 0
 
-        confirm_str = f"{pending_count}/{CONFIRM_COUNT}" if zone != "hold" else "---"
+        confirm_str = (f"{pending_count}/{CONFIRM_COUNT}"
+                       if zone not in ("hold",) and zone != current_command
+                       else "---")
         label = {"go": "GO  ", "stop": "STOP", "hold": "HOLD"}[zone]
         print(f"{label}  alpha={alpha_amplitude:.3f}  confirm={confirm_str}  cmd={current_command}")
 
