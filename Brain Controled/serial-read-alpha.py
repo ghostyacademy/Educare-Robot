@@ -35,8 +35,11 @@ CONFIRM_COUNT = 3              # require N consecutive same-zone readings to act
 # STOP when alpha <  THRESHOLD - HYSTERESIS   (eyes open   = low alpha)
 # HOLD (no change)   when alpha is in the dead band
 #
-THRESHOLD  = 11.12            # midpoint between eyes-closed and eyes-open mean
-HYSTERESIS = 0.61             # dead band on each side of the midpoint
+THRESHOLD  = 13.0            # midpoint between eyes-closed (~18) and eyes-open (~9.7)
+HYSTERESIS = 2.0             # GO > 15.0  |  STOP < 11.0  |  HOLD in between
+
+# Minimum signal level — below this the electrodes have lost contact
+NO_CONTACT_LIMIT = 2.0
 
 # ── Parse CLI args ─────────────────────────────────────────────────────────────
 args           = sys.argv[1:]
@@ -92,8 +95,11 @@ def collect_amplitudes(duration_s, label):
             continue
 
         filtered = apply_filter(np.array(buf), lowcut, highcut, sampling_rate)
-        amps.append(np.sqrt(np.mean(filtered ** 2)))
+        amp = np.sqrt(np.mean(filtered ** 2))
+        amps.append(amp)
+        print(f"    alpha={amp:.2f}", end="\r", flush=True)  # live readout
 
+    print()  # newline after the live readout
     return amps
 
 # ── Calibration mode ───────────────────────────────────────────────────────────
@@ -216,6 +222,11 @@ try:
 
         filtered        = apply_filter(np.array(data_buffer), lowcut, highcut, sampling_rate)
         alpha_amplitude = np.sqrt(np.mean(filtered ** 2))
+
+        # Electrode contact lost — near-zero signal means nothing is connected
+        if alpha_amplitude < NO_CONTACT_LIMIT:
+            print(f"NOCONTACT  alpha={alpha_amplitude:.3f}  (check electrodes!)")
+            continue
 
         # Artifact rejection: spikes > 4× threshold are almost certainly
         # movement or electrode noise, not real brain signal — skip them.
