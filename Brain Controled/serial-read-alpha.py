@@ -2,9 +2,9 @@
 EEG Alpha-wave Robot Controller
 
 Usage:
-    python serial-read-alpha.py              # normal mode, COM16
-    python serial-read-alpha.py COM5         # normal mode, COM5
-    python serial-read-alpha.py COM16 --calibrate   # calibration mode
+    python serial-read-alpha.py              # normal mode, COM5
+    python serial-read-alpha.py COM5         # normal mode, explicit port
+    python serial-read-alpha.py COM5 --calibrate   # calibration mode
 """
 import sys
 import time
@@ -13,35 +13,39 @@ import matplotlib.pyplot as plt
 from scipy.signal import butter, lfilter
 from collections import deque
 
-# ── Configuration ────────────────────────────────────────────────────────────
+# ── Configuration ─────────────────────────────────────────────────────────────
 sampling_rate = 169          # measured from Arduino Uno on COM5
-window_size = 1024           # ~6 seconds of data before first decision
+window_size   = 1024         # ~6 seconds of data before first decision
 
-lowcut = 8.0                 # alpha band Hz
+lowcut  = 8.0                # alpha band Hz
 highcut = 12.0
 
-# Run --calibrate to get real values for the current user
-# Values below measured 2026-06-02 — redo calibration per user with electrodes on
-AMPLITUDE_THRESHOLD_LOW  = 9.65
-AMPLITUDE_THRESHOLD_HIGH = 9.88
+# Single threshold + hysteresis (run --calibrate to get right values per user)
+#
+# GO   when alpha >  THRESHOLD + HYSTERESIS   (eyes closed = high alpha)
+# STOP when alpha <  THRESHOLD - HYSTERESIS   (eyes open   = low alpha)
+# HOLD (no change)   when alpha is between the two  ← prevents jitter
+#
+THRESHOLD  = 14.0            # midpoint between eyes-closed and eyes-open mean
+HYSTERESIS = 0.5             # dead band on each side of the midpoint
 
-# ── Parse CLI args ────────────────────────────────────────────────────────────
-args = sys.argv[1:]
+# ── Parse CLI args ─────────────────────────────────────────────────────────────
+args           = sys.argv[1:]
 calibrate_mode = "--calibrate" in args
-port_args = [a for a in args if not a.startswith("--")]
-serial_port = port_args[0] if port_args else "COM5"
-baudrate = 115200
+port_args      = [a for a in args if not a.startswith("--")]
+serial_port    = port_args[0] if port_args else "COM5"
+baudrate       = 115200
 
-# ── Signal processing helpers ─────────────────────────────────────────────────
+# ── Signal processing ──────────────────────────────────────────────────────────
 def butter_bandpass(lowcut, highcut, fs, order=4):
     nyq = 0.5 * fs
-    return butter(order, [lowcut / nyq, highcut / nyq], btype='band')
+    return butter(order, [lowcut / nyq, highcut / nyq], btype="band")
 
 def apply_filter(data, lowcut, highcut, fs):
     b, a = butter_bandpass(lowcut, highcut, fs)
     return lfilter(b, a, data)
 
-# ── Connect to serial port ────────────────────────────────────────────────────
+# ── Connect ────────────────────────────────────────────────────────────────────
 import serial
 try:
     ser = serial.Serial(serial_port, baudrate, timeout=1)
@@ -51,137 +55,154 @@ except Exception as e:
     print("Run 'python test_sensor.py' to see available ports.")
     sys.exit(1)
 
-# ── Calibration mode ──────────────────────────────────────────────────────────
+# ── Collect helper ─────────────────────────────────────────────────────────────
+def collect_amplitudes(duration_s, label):
+    """Read EEG for duration_s seconds, return list of alpha amplitudes."""
+    buf = deque(maxlen=window_size)
+    amps = []
+    end_time      = time.time() + duration_s
+    last_progress = time.time()
+
+    while time.time() < end_time:
+        raw = ser.readline().decode("utf-8", errors="replace").strip()
+        if not raw:
+            continue
+        try:
+            val = float(raw.split(",")[0])
+        except (ValueError, IndexError):
+            continue
+
+        buf.append(val)
+
+        if time.time() - last_progress >= 3:
+            print(f"  [{label}] {end_time - time.time():.0f}s left  "
+                  f"(buffer {len(buf)}/{window_size})")
+            last_progress = time.time()
+
+        if len(buf) < window_size:
+            continue
+
+        filtered = apply_filter(np.array(buf), lowcut, highcut, sampling_rate)
+        amps.append(np.sqrt(np.mean(filtered ** 2)))
+
+    return amps
+
+# ── Calibration mode ───────────────────────────────────────────────────────────
 if calibrate_mode:
-    print("\n=== CALIBRATION MODE ===")
-    print("Keep your eyes CLOSED and relax for 15 seconds, then OPEN your eyes.")
-    print(f"Collecting {window_size} samples before first reading...")
+    print("\n=== CALIBRATION — two phases, 20 seconds each ===\n")
 
-    amplitudes = []
-    data_buffer = deque(maxlen=window_size)
-    cal_start = time.time()
-    cal_duration = 30
+    input("Phase 1 — Close your eyes and RELAX. Press Enter when ready...")
+    print("  Recording eyes-CLOSED for 20 seconds...")
+    closed_amps = collect_amplitudes(20, "EYES CLOSED")
 
-    try:
-        while time.time() - cal_start < cal_duration:
-            line_data = ser.readline().decode("utf-8", errors="replace").strip()
-            if not line_data:
-                continue
-            try:
-                eeg_value = float(line_data.split(',')[0])
-            except (ValueError, IndexError):
-                continue
-
-            data_buffer.append(eeg_value)
-
-            if len(data_buffer) < window_size:
-                filled = len(data_buffer)
-                if filled % 256 == 0:
-                    print(f"  Collecting... {filled}/{window_size}")
-                continue
-
-            filtered = apply_filter(np.array(data_buffer), lowcut, highcut, sampling_rate)
-            amp = np.sqrt(np.mean(filtered ** 2))
-            amplitudes.append(amp)
-            remaining = cal_duration - (time.time() - cal_start)
-            print(f"  Alpha amplitude: {amp:.3f}  ({remaining:.0f}s remaining)")
-
-    except KeyboardInterrupt:
-        print("\nCalibration stopped early.")
+    print()
+    input("Phase 2 — Open your eyes and FOCUS on something. Press Enter when ready...")
+    print("  Recording eyes-OPEN for 20 seconds...")
+    open_amps = collect_amplitudes(20, "EYES OPEN")
 
     ser.close()
 
-    if len(amplitudes) < 3:
-        print("Not enough data collected. Check sensor connection.")
+    if len(closed_amps) < 3 or len(open_amps) < 3:
+        print("\nNot enough data — check sensor connection and try again.")
         sys.exit(1)
 
-    arr = np.array(amplitudes)
-    mn, mx, mean, std = arr.min(), arr.max(), arr.mean(), arr.std()
+    mean_closed = np.mean(closed_amps)
+    mean_open   = np.mean(open_amps)
+    diff        = abs(mean_closed - mean_open)
+    threshold   = round((mean_closed + mean_open) / 2, 2)
+    hysteresis  = round(max(diff / 4, 0.3), 2)
+
     print(f"\n--- Calibration Results ---")
-    print(f"  Min   : {mn:.3f}")
-    print(f"  Max   : {mx:.3f}")
-    print(f"  Mean  : {mean:.3f}")
-    print(f"  Std   : {std:.3f}")
-    suggested_low  = round(mean - 0.5 * std, 2)
-    suggested_high = round(mean + 0.5 * std, 2)
-    print(f"\n  Suggested thresholds:")
-    print(f"    AMPLITUDE_THRESHOLD_LOW  = {suggested_low}")
-    print(f"    AMPLITUDE_THRESHOLD_HIGH = {suggested_high}")
-    print("\nUpdate these values in serial-read-alpha.py, then run without --calibrate.")
+    print(f"  Eyes CLOSED mean : {mean_closed:.3f}")
+    print(f"  Eyes OPEN   mean : {mean_open:.3f}")
+    print(f"  Difference       : {diff:.3f}")
+
+    if diff < 0.5:
+        print("\n  WARNING: very small difference between states.")
+        print("  Check electrode contact on the scalp.")
+
+    print(f"\n  Suggested settings:")
+    print(f"    THRESHOLD  = {threshold}")
+    print(f"    HYSTERESIS = {hysteresis}")
+    print("\nUpdate these in serial-read-alpha.py, then run without --calibrate.")
     sys.exit(0)
 
-# ── Normal mode ───────────────────────────────────────────────────────────────
-data_buffer = deque(maxlen=window_size)
+# ── Normal mode ────────────────────────────────────────────────────────────────
+data_buffer     = deque(maxlen=window_size)
+current_command = "stop"    # persists through the hysteresis dead band
+
+go_line   = THRESHOLD + HYSTERESIS
+stop_line = THRESHOLD - HYSTERESIS
 
 plt.ion()
-fig, ax = plt.subplots()
-x_vals = []
-y_vals = []
-line_plot, = ax.plot([], [], lw=2)
-ax.axhline(AMPLITUDE_THRESHOLD_LOW,  color='orange', linestyle='--', label='Threshold LOW')
-ax.axhline(AMPLITUDE_THRESHOLD_HIGH, color='red',    linestyle='--', label='Threshold HIGH')
+fig, ax = plt.subplots(figsize=(10, 4))
+x_vals, y_vals = [], []
+line_plot, = ax.plot([], [], lw=2, color="steelblue")
+ax.axhline(go_line,   color="green",  linestyle="--", lw=1.5, label=f"GO above {go_line:.2f}")
+ax.axhline(stop_line, color="red",    linestyle="--", lw=1.5, label=f"STOP below {stop_line:.2f}")
+ax.axhline(THRESHOLD, color="orange", linestyle=":",  lw=1,   label=f"Midpoint {THRESHOLD:.2f}", alpha=0.6)
+ax.fill_between([0, 60], stop_line, go_line, alpha=0.07, color="orange", label="Hold zone")
 ax.set_xlim(0, 60)
-ax.set_ylim(0, 30)      # wide initial range; auto-scales once data arrives
+ax.set_ylim(max(0, THRESHOLD - 5), THRESHOLD + 5)
 ax.set_xlabel("Time (s)")
 ax.set_ylabel("Alpha Amplitude (RMS)")
-ax.set_title(f"Real-Time Alpha Oscillation — {serial_port}")
-ax.legend(loc='upper right')
+ax.set_title(f"EEG — {serial_port}  |  GO > {go_line:.2f}  |  STOP < {stop_line:.2f}")
+ax.legend(loc="upper right", fontsize=8)
 fig.tight_layout()
 
 start_plot_time = time.time()
-
-print(f"Collecting {window_size} samples ({window_size // sampling_rate}s) before first command...")
+print(f"Collecting {window_size} samples (~{window_size // sampling_rate}s) before first command...")
 
 try:
     while True:
-        line_data = ser.readline().decode("utf-8", errors="replace").strip()
-        if not line_data:
+        raw = ser.readline().decode("utf-8", errors="replace").strip()
+        if not raw:
             continue
-
         try:
-            eeg_value = float(line_data.split(',')[0])
+            eeg_value = float(raw.split(",")[0])
         except (ValueError, IndexError):
             continue
 
         data_buffer.append(eeg_value)
 
-        # Progress feedback while buffer fills
         if len(data_buffer) < window_size:
             filled = len(data_buffer)
             if filled % 256 == 0:
                 print(f"  Collecting... {filled}/{window_size}")
             continue
 
-        raw_data = np.array(data_buffer)
-        filtered = apply_filter(raw_data, lowcut, highcut, sampling_rate)
+        filtered        = apply_filter(np.array(data_buffer), lowcut, highcut, sampling_rate)
         alpha_amplitude = np.sqrt(np.mean(filtered ** 2))
 
-        if alpha_amplitude < AMPLITUDE_THRESHOLD_LOW or alpha_amplitude > AMPLITUDE_THRESHOLD_HIGH:
-            command = "stop"
-            print(f"STOP  alpha={alpha_amplitude:.3f}")
+        if alpha_amplitude > go_line:
+            current_command = "go"
+            label = "GO  "
+        elif alpha_amplitude < stop_line:
+            current_command = "stop"
+            label = "STOP"
         else:
-            command = "go"
-            print(f"GO    alpha={alpha_amplitude:.3f}")
+            label = "HOLD"    # in dead band — keep previous command
+
+        print(f"{label}  alpha={alpha_amplitude:.3f}  cmd={current_command}")
 
         with open("motor_command.txt", "w") as f:
-            f.write(f"{command},{time.time():.3f}")
+            f.write(f"{current_command},{time.time():.3f}")
 
         # Update plot
-        current_time = time.time() - start_plot_time
-        x_vals.append(current_time)
+        t = time.time() - start_plot_time
+        x_vals.append(t)
         y_vals.append(alpha_amplitude)
 
-        if x_vals[-1] > 60:
-            cutoff = x_vals[-1] - 60
-            keep = [i for i, t in enumerate(x_vals) if t >= cutoff]
+        if t > 60:
+            cutoff = t - 60
+            keep   = [i for i, v in enumerate(x_vals) if v >= cutoff]
             x_vals = [x_vals[i] for i in keep]
             y_vals = [y_vals[i] for i in keep]
             ax.set_xlim(x_vals[0], x_vals[-1])
 
-        # Auto-scale y with a bit of padding
         if y_vals:
-            lo = max(0, min(y_vals) * 0.8)
-            hi = max(y_vals) * 1.2
+            lo = max(0, min(y_vals) * 0.95)
+            hi = max(y_vals) * 1.05
             ax.set_ylim(lo, hi)
 
         line_plot.set_data(x_vals, y_vals)

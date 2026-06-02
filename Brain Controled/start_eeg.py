@@ -66,27 +66,25 @@ if proc.returncode != 0:
 # ── Step 2: Parse & apply thresholds ─────────────────────────────────────────
 banner("Step 2/3 — Updating Thresholds")
 
-low_match  = re.search(r"AMPLITUDE_THRESHOLD_LOW\s*=\s*([\d.]+)", output)
-high_match = re.search(r"AMPLITUDE_THRESHOLD_HIGH\s*=\s*([\d.]+)", output)
+threshold_match  = re.search(r"THRESHOLD\s*=\s*([\d.]+)", output)
+hysteresis_match = re.search(r"HYSTERESIS\s*=\s*([\d.]+)", output)
 
-if not low_match or not high_match:
+if not threshold_match or not hysteresis_match:
     print("Could not read threshold values from calibration output.")
-    print("Check that the sensor sent data during calibration.")
+    print("Check that the sensor sent data during both phases.")
     input("Press Enter to exit.")
     sys.exit(1)
 
-low  = low_match.group(1)
-high = high_match.group(1)
-print(f"\n  LOW  = {low}")
-print(f"  HIGH = {high}")
+threshold  = threshold_match.group(1)
+hysteresis = hysteresis_match.group(1)
+print(f"\n  THRESHOLD  = {threshold}")
+print(f"  HYSTERESIS = {hysteresis}")
 
 with open(ALPHA_SCRIPT, "r") as f:
     code = f.read()
 
-code = re.sub(r"AMPLITUDE_THRESHOLD_LOW\s*=\s*[\d.]+",
-              f"AMPLITUDE_THRESHOLD_LOW  = {low}", code)
-code = re.sub(r"AMPLITUDE_THRESHOLD_HIGH\s*=\s*[\d.]+",
-              f"AMPLITUDE_THRESHOLD_HIGH = {high}", code)
+code = re.sub(r"THRESHOLD\s*=\s*[\d.]+",  f"THRESHOLD  = {threshold}",  code)
+code = re.sub(r"HYSTERESIS\s*=\s*[\d.]+", f"HYSTERESIS = {hysteresis}", code)
 
 with open(ALPHA_SCRIPT, "w") as f:
     f.write(code)
