@@ -23,8 +23,8 @@ def run_motor(bot, port, speed):
     bot.write(packet)
 
 def move_forward(bot):
-    run_motor(bot, 0x09,  100)
-    run_motor(bot, 0x0A, -100)
+    run_motor(bot, 0x09, -100)
+    run_motor(bot, 0x0A,  100)
 
 def stop_motors(bot):
     run_motor(bot, 0x09, 0)

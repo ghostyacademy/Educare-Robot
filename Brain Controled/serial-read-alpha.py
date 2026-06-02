@@ -35,7 +35,7 @@ CONFIRM_COUNT = 1              # require N consecutive same-zone readings to act
 # STOP when alpha <  THRESHOLD - HYSTERESIS   (eyes open   = low alpha)
 # HOLD (no change)   when alpha is in the dead band
 #
-THRESHOLD  = 9.77            # midpoint between eyes-closed (~18) and eyes-open (~9.7)
+THRESHOLD  = 9.76            # midpoint between eyes-closed (~18) and eyes-open (~9.7)
 HYSTERESIS = 0.18            # narrower dead band for faster reaction
 
 # Minimum signal level — below this the electrodes have lost contact
