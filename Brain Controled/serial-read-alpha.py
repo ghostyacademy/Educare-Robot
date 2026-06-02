@@ -20,14 +20,20 @@ window_size   = 1024         # ~6 seconds of data before first decision
 lowcut  = 8.0                # alpha band Hz
 highcut = 12.0
 
-# Single threshold + hysteresis (run --calibrate to get right values per user)
+# How often to evaluate and how long to sustain a decision before acting.
+# Alpha naturally oscillates every few seconds; these two settings prevent
+# a single spike from flipping the robot command.
+UPDATE_EVERY  = sampling_rate  # re-evaluate once per second (not every sample)
+CONFIRM_COUNT = 3              # require N consecutive same-zone readings to act
+
+# Single threshold + hysteresis (run --calibrate to set these per user)
 #
 # GO   when alpha >  THRESHOLD + HYSTERESIS   (eyes closed = high alpha)
 # STOP when alpha <  THRESHOLD - HYSTERESIS   (eyes open   = low alpha)
-# HOLD (no change)   when alpha is between the two  ← prevents jitter
+# HOLD (no change)   when alpha is in the dead band
 #
-THRESHOLD  = 13.59            # midpoint between eyes-closed and eyes-open mean
-HYSTERESIS = 0.37             # dead band on each side of the midpoint
+THRESHOLD  = 14.33            # midpoint between eyes-closed and eyes-open mean
+HYSTERESIS = 0.3             # dead band on each side of the midpoint
 
 # ── Parse CLI args ─────────────────────────────────────────────────────────────
 args           = sys.argv[1:]
@@ -128,8 +134,11 @@ if calibrate_mode:
     sys.exit(0)
 
 # ── Normal mode ────────────────────────────────────────────────────────────────
-data_buffer     = deque(maxlen=window_size)
-current_command = "stop"    # persists through the hysteresis dead band
+data_buffer      = deque(maxlen=window_size)
+current_command  = "stop"   # persists through the dead band
+pending_command  = "stop"   # candidate that must be confirmed
+pending_count    = 0        # how many consecutive readings support pending
+samples_since_update = 0    # counts toward next evaluation
 
 go_line   = THRESHOLD + HYSTERESIS
 stop_line = THRESHOLD - HYSTERESIS
@@ -164,6 +173,7 @@ try:
             continue
 
         data_buffer.append(eeg_value)
+        samples_since_update += 1
 
         if len(data_buffer) < window_size:
             filled = len(data_buffer)
@@ -171,19 +181,40 @@ try:
                 print(f"  Collecting... {filled}/{window_size}")
             continue
 
+        # Only evaluate once per second — alpha naturally oscillates every
+        # few seconds; evaluating every sample just amplifies that noise.
+        if samples_since_update < UPDATE_EVERY:
+            continue
+        samples_since_update = 0
+
         filtered        = apply_filter(np.array(data_buffer), lowcut, highcut, sampling_rate)
         alpha_amplitude = np.sqrt(np.mean(filtered ** 2))
 
+        # Determine which zone we are in
         if alpha_amplitude > go_line:
-            current_command = "go"
-            label = "GO  "
+            zone = "go"
         elif alpha_amplitude < stop_line:
-            current_command = "stop"
-            label = "STOP"
+            zone = "stop"
         else:
-            label = "HOLD"    # in dead band — keep previous command
+            zone = "hold"
+            pending_count = 0   # reset streak when signal is ambiguous
 
-        print(f"{label}  alpha={alpha_amplitude:.3f}  cmd={current_command}")
+        # Confirmation: the zone must persist for CONFIRM_COUNT readings in a
+        # row before the command actually changes. One spike does nothing.
+        if zone != "hold":
+            if zone == pending_command:
+                pending_count += 1
+            else:
+                pending_command = zone
+                pending_count   = 1
+
+            if pending_count >= CONFIRM_COUNT:
+                current_command = zone
+                pending_count   = 0   # reset so next change also needs N readings
+
+        confirm_str = f"{pending_count}/{CONFIRM_COUNT}" if zone != "hold" else "---"
+        label = {"go": "GO  ", "stop": "STOP", "hold": "HOLD"}[zone]
+        print(f"{label}  alpha={alpha_amplitude:.3f}  confirm={confirm_str}  cmd={current_command}")
 
         with open("motor_command.txt", "w") as f:
             f.write(f"{current_command},{time.time():.3f}")
