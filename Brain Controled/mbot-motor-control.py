@@ -1,7 +1,7 @@
 import serial
 import time
 
-serial_port = "COM3"   # mBot Bluetooth — try COM4 if COM3 fails
+serial_port = "COM6"   # mBot via USB cable (BLE cannot create a COM port)
 baudrate    = 115200
 
 def connect():
