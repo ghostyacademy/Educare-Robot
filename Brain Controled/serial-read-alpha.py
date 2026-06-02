@@ -26,8 +26,8 @@ highcut = 12.0
 # STOP when alpha <  THRESHOLD - HYSTERESIS   (eyes open   = low alpha)
 # HOLD (no change)   when alpha is between the two  ← prevents jitter
 #
-THRESHOLD  = 14.0            # midpoint between eyes-closed and eyes-open mean
-HYSTERESIS = 0.5             # dead band on each side of the midpoint
+THRESHOLD  = 13.59            # midpoint between eyes-closed and eyes-open mean
+HYSTERESIS = 0.37             # dead band on each side of the midpoint
 
 # ── Parse CLI args ─────────────────────────────────────────────────────────────
 args           = sys.argv[1:]

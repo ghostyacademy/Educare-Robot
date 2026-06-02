@@ -80,13 +80,13 @@ hysteresis = hysteresis_match.group(1)
 print(f"\n  THRESHOLD  = {threshold}")
 print(f"  HYSTERESIS = {hysteresis}")
 
-with open(ALPHA_SCRIPT, "r") as f:
+with open(ALPHA_SCRIPT, "r", encoding="utf-8") as f:
     code = f.read()
 
 code = re.sub(r"THRESHOLD\s*=\s*[\d.]+",  f"THRESHOLD  = {threshold}",  code)
 code = re.sub(r"HYSTERESIS\s*=\s*[\d.]+", f"HYSTERESIS = {hysteresis}", code)
 
-with open(ALPHA_SCRIPT, "w") as f:
+with open(ALPHA_SCRIPT, "w", encoding="utf-8") as f:
     f.write(code)
 
 print("\n  serial-read-alpha.py updated successfully.")
