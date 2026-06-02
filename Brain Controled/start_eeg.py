@@ -95,19 +95,24 @@ print("\n  serial-read-alpha.py updated successfully.")
 
 # ── Step 3: Launch both scripts ───────────────────────────────────────────────
 banner("Step 3/3 — Launching")
+
+# Write tiny runner bats so paths with spaces don't break the start command
+eeg_runner   = os.path.join(HERE, "_run_eeg_reader.bat")
+motor_runner = os.path.join(HERE, "_run_robot_ctrl.bat")
+
+with open(eeg_runner, "w") as f:
+    f.write(f'@echo off\ncd /d "{HERE}"\npython serial-read-alpha.py COM5\npause\n')
+
+with open(motor_runner, "w") as f:
+    f.write(f'@echo off\ncd /d "{HERE}"\npython mbot-motor-control.py\npause\n')
+
 print()
 print("  Opening EEG reader in a new window...")
-subprocess.Popen(
-    f'start "EEG Reader" cmd /k "{PYTHON}" "{ALPHA_SCRIPT}" COM5',
-    shell=True, cwd=HERE
-)
+subprocess.Popen(f'start "EEG Reader" "{eeg_runner}"', shell=True)
 time.sleep(1)
 
 print("  Opening robot controller in a new window...")
-subprocess.Popen(
-    f'start "Robot Controller" cmd /k "{PYTHON}" "{MOTOR_SCRIPT}"',
-    shell=True, cwd=HERE
-)
+subprocess.Popen(f'start "Robot Controller" "{motor_runner}"', shell=True)
 
 print()
 print("  Both scripts are running.")
