@@ -7,7 +7,10 @@ Usage:
     python serial-read-alpha.py COM5 --calibrate   # calibration mode
 """
 import sys
+import os
+import re
 import time
+import subprocess
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.signal import butter, lfilter
@@ -32,8 +35,8 @@ CONFIRM_COUNT = 3              # require N consecutive same-zone readings to act
 # STOP when alpha <  THRESHOLD - HYSTERESIS   (eyes open   = low alpha)
 # HOLD (no change)   when alpha is in the dead band
 #
-THRESHOLD  = 14.33            # midpoint between eyes-closed and eyes-open mean
-HYSTERESIS = 0.3             # dead band on each side of the midpoint
+THRESHOLD  = 111.7            # midpoint between eyes-closed and eyes-open mean
+HYSTERESIS = 48.99             # dead band on each side of the midpoint
 
 # ── Parse CLI args ─────────────────────────────────────────────────────────────
 args           = sys.argv[1:]
@@ -127,10 +130,34 @@ if calibrate_mode:
         print("\n  WARNING: very small difference between states.")
         print("  Check electrode contact on the scalp.")
 
-    print(f"\n  Suggested settings:")
+    print(f"\n  Applied settings:")
     print(f"    THRESHOLD  = {threshold}")
     print(f"    HYSTERESIS = {hysteresis}")
-    print("\nUpdate these in serial-read-alpha.py, then run without --calibrate.")
+
+    # Self-update: write new threshold values back into this file
+    this_file = os.path.abspath(__file__)
+    with open(this_file, "r", encoding="utf-8") as f:
+        code = f.read()
+    code = re.sub(r"THRESHOLD\s*=\s*[\d.]+",  f"THRESHOLD  = {threshold}",  code)
+    code = re.sub(r"HYSTERESIS\s*=\s*[\d.]+", f"HYSTERESIS = {hysteresis}", code)
+    with open(this_file, "w", encoding="utf-8") as f:
+        f.write(code)
+    print("\n  serial-read-alpha.py updated.")
+
+    # Write helper runner bats (handles the space in 'Brain Controled')
+    here = os.path.dirname(this_file)
+    eeg_runner   = os.path.join(here, "_run_eeg_reader.bat")
+    motor_runner = os.path.join(here, "_run_robot_ctrl.bat")
+    with open(eeg_runner, "w") as f:
+        f.write(f'@echo off\ncd /d "{here}"\npython serial-read-alpha.py COM5\npause\n')
+    with open(motor_runner, "w") as f:
+        f.write(f'@echo off\ncd /d "{here}"\npython mbot-motor-control.py\npause\n')
+
+    print("\n  Launching EEG reader and robot controller...")
+    subprocess.Popen(f'start "EEG Reader" "{eeg_runner}"', shell=True)
+    time.sleep(1)
+    subprocess.Popen(f'start "Robot Controller" "{motor_runner}"', shell=True)
+    print("  Done — check the two new windows.")
     sys.exit(0)
 
 # ── Normal mode ────────────────────────────────────────────────────────────────
