@@ -14,21 +14,22 @@ from scipy.signal import butter, lfilter
 from collections import deque
 
 # ── Configuration ────────────────────────────────────────────────────────────
-sampling_rate = 256
-window_size = 2048          # 8 seconds of data before first decision
+sampling_rate = 169          # measured from Arduino Uno on COM5
+window_size = 1024           # ~6 seconds of data before first decision
 
-lowcut = 8.0                # alpha band Hz
+lowcut = 8.0                 # alpha band Hz
 highcut = 12.0
 
-# Adjust these after running --calibrate
-AMPLITUDE_THRESHOLD_LOW  = 8.0
-AMPLITUDE_THRESHOLD_HIGH = 8.7
+# Run --calibrate to get real values for the current user
+# Values below measured 2026-06-02 — redo calibration per user with electrodes on
+AMPLITUDE_THRESHOLD_LOW  = 9.65
+AMPLITUDE_THRESHOLD_HIGH = 9.88
 
 # ── Parse CLI args ────────────────────────────────────────────────────────────
 args = sys.argv[1:]
 calibrate_mode = "--calibrate" in args
 port_args = [a for a in args if not a.startswith("--")]
-serial_port = port_args[0] if port_args else "COM16"
+serial_port = port_args[0] if port_args else "COM5"
 baudrate = 115200
 
 # ── Signal processing helpers ─────────────────────────────────────────────────

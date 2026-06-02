@@ -28,8 +28,11 @@ The key insight: alpha wave amplitude rises when you **close your eyes and relax
 
 | Device | Default port | Where to change it |
 |--------|-------------|-------------------|
-| EEG sensor | `COM16` | `serial-read-alpha.py` line 1 or CLI argument |
+| EEG sensor (Arduino Uno — streams ADC values) | `COM5` | `serial-read-alpha.py` line 1 or CLI argument |
+| EEG front-end board (CH340, firmware only) | `COM6` | Not used by scripts — informational only |
 | mBot robot | `COM15` | `mbot-motor-control.py` line 5 |
+
+> **Hardware note:** The setup has two USB devices. The **Arduino Uno (COM5)** reads the analog EEG signal and streams ~169 Hz numeric values to the computer — this is what the scripts talk to. The **CH340 board (COM6)** is the analog front-end; it prints a version string on connect (`Version: 06.01.107`) and does not stream data directly. No driver installation is needed on Windows 10/11 — both are detected automatically.
 
 ---
 
@@ -60,29 +63,29 @@ pip install pyserial numpy scipy matplotlib
 
 Before anything else, confirm the sensor is actually sending data.
 
-Plug in the EEG sensor, then run:
+Plug in both USB devices, then run:
 
 ```bash
 cd "Brain Controled"
-python test_sensor.py
+python test_sensor.py COM5
 ```
 
 The script will:
 - List all available COM ports on your computer
-- Connect to `COM16` and listen for 15 seconds
+- Connect to `COM5` (the Arduino) and listen for 15 seconds
 - Print every line of data it receives
 - Report whether the format looks correct
 
-**If no data appears:** try other ports by running `python test_sensor.py COM5` (replace COM5 with each port listed at startup until you find the right one). Once found, update `serial_port` in `serial-read-alpha.py`.
-
 **Expected output when sensor is working:**
 ```
-[OK] 512.3
-[OK] 498.7
-[OK] 523.1
+[OK] 509
+[OK] 511
+[OK] 527
 ...
-RESULT: Sensor is working! Data rate: 256 lines/sec
+RESULT: Sensor is working! Data rate: 169 lines/sec
 ```
+
+**If no data on COM5:** unplug and replug the Arduino, then retry. If you see different port numbers, run `python test_sensor.py COMX` for each port listed at startup.
 
 ---
 
@@ -91,7 +94,7 @@ RESULT: Sensor is working! Data rate: 256 lines/sec
 Every person's brain produces different alpha wave amplitudes. The thresholds **must be calibrated** for each user before the system will work reliably.
 
 ```bash
-python serial-read-alpha.py COM16 --calibrate
+python serial-read-alpha.py COM5 --calibrate
 ```
 
 **During calibration (30 seconds):**
@@ -102,15 +105,17 @@ At the end, the script prints something like:
 
 ```
 --- Calibration Results ---
-  Min   : 6.241
-  Max   : 14.873
-  Mean  : 9.105
-  Std   : 2.341
+  Min   : 8.256
+  Max   : 11.602
+  Mean  : 9.769
+  Std   : 0.232
 
   Suggested thresholds:
-    AMPLITUDE_THRESHOLD_LOW  = 7.93
-    AMPLITUDE_THRESHOLD_HIGH = 10.28
+    AMPLITUDE_THRESHOLD_LOW  = 9.65
+    AMPLITUDE_THRESHOLD_HIGH = 9.88
 ```
+
+> **Important:** Run calibration with the **electrodes properly placed on the user's scalp** for meaningful results. The first calibration run (2026-06-02) was done without electrodes — those values are a baseline placeholder only. Each new user should run their own calibration.
 
 Open `serial-read-alpha.py` and update lines near the top:
 
@@ -129,7 +134,7 @@ You need **two terminals open at the same time**, both inside the `Brain Control
 
 **Terminal 1 — EEG reader:**
 ```bash
-python serial-read-alpha.py COM16
+python serial-read-alpha.py COM5
 ```
 
 **Terminal 2 — Robot controller:**
@@ -162,8 +167,8 @@ A live graph will appear showing your alpha wave amplitude in real time, with th
 - Amplitude values are outside the visible range. This was a known bug — it is now fixed with auto-scaling.
 - If still blank: check the console for `Collecting... N/2048` progress messages.
 
-### Data rate is not ~256 Hz
-- The sensor may be configured differently. Note the actual rate printed by `test_sensor.py` and update `sampling_rate` in `serial-read-alpha.py`.
+### Data rate is not ~169 Hz
+- The measured rate on this setup is ~169 Hz (confirmed 2026-06-02). If you see a very different rate, update `sampling_rate` in `serial-read-alpha.py` to match.
 
 ---
 
@@ -200,10 +205,10 @@ All in `serial-read-alpha.py`:
 
 | Parameter | Default | What it does |
 |-----------|---------|-------------|
-| `serial_port` | `"COM16"` | COM port of the EEG sensor |
+| `serial_port` | `"COM5"` | COM port of the Arduino Uno |
 | `baudrate` | `115200` | Must match the sensor's baud rate |
-| `sampling_rate` | `256` | Hz — must match the sensor |
-| `window_size` | `2048` | Samples per decision (~8s). Lower = faster but noisier |
+| `sampling_rate` | `169` | Hz — measured value for this Arduino setup |
+| `window_size` | `1024` | Samples per decision (~6s). Lower = faster but noisier |
 | `lowcut / highcut` | `8.0 / 12.0` | Alpha band limits in Hz. Do not change without reason |
 | `AMPLITUDE_THRESHOLD_LOW` | `8.0` | Calibrate this per user |
 | `AMPLITUDE_THRESHOLD_HIGH` | `8.7` | Calibrate this per user |
