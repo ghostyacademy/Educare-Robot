@@ -38,20 +38,25 @@ try:
         # Read command file
         try:
             with open("motor_command.txt", "r") as f:
-                command = f.read().strip().lower().split(",")[0]
-        except FileNotFoundError:
+                content = f.read().strip().lower()
+            parts   = content.split(",")
+            command = parts[0]
+            file_ts = float(parts[1]) if len(parts) > 1 else None
+        except (FileNotFoundError, ValueError, IndexError):
             command = None
+            file_ts = None
 
         # Only send a packet when the command actually changes — sending
         # every 100ms floods the Bluetooth link and causes disconnects.
         if command in ("go", "stop") and command != last_command:
+            file_lag = f"  (file→motor lag: {time.time() - file_ts:.2f}s)" if file_ts else ""
             try:
                 if command == "go":
                     move_forward(mbot)
-                    print("GO  → motors forward")
+                    print(f"GO  → motors forward{file_lag}")
                 else:
                     stop_motors(mbot)
-                    print("STOP → motors off")
+                    print(f"STOP → motors off{file_lag}")
                 last_command = command
             except (serial.SerialException, OSError) as e:
                 print(f"Bluetooth dropped: {e}. Reconnecting...")

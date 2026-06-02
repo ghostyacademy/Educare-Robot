@@ -27,7 +27,7 @@ highcut = 12.0
 # Alpha naturally oscillates every few seconds; these two settings prevent
 # a single spike from flipping the robot command.
 UPDATE_EVERY  = sampling_rate  # re-evaluate once per second (not every sample)
-CONFIRM_COUNT = 3              # require N consecutive same-zone readings to act
+CONFIRM_COUNT = 1              # require N consecutive same-zone readings to act
 
 # Single threshold + hysteresis (run --calibrate to set these per user)
 #
@@ -35,8 +35,8 @@ CONFIRM_COUNT = 3              # require N consecutive same-zone readings to act
 # STOP when alpha <  THRESHOLD - HYSTERESIS   (eyes open   = low alpha)
 # HOLD (no change)   when alpha is in the dead band
 #
-THRESHOLD  = 13.0            # midpoint between eyes-closed (~18) and eyes-open (~9.7)
-HYSTERESIS = 2.0             # GO > 15.0  |  STOP < 11.0  |  HOLD in between
+THRESHOLD  = 9.77            # midpoint between eyes-closed (~18) and eyes-open (~9.7)
+HYSTERESIS = 0.18            # narrower dead band for faster reaction
 
 # Minimum signal level — below this the electrodes have lost contact
 NO_CONTACT_LIMIT = 2.0
@@ -125,7 +125,8 @@ if calibrate_mode:
     mean_open   = np.mean(open_amps)
     diff        = abs(mean_closed - mean_open)
     threshold   = round((mean_closed + mean_open) / 2, 2)
-    hysteresis  = round(max(diff / 4, 0.3), 2)
+    hysteresis  = round(max(diff / 6, 0.18), 2)
+    confirm_count = 1 if diff < 1.0 else 2
 
     print(f"\n--- Calibration Results ---")
     print(f"  Eyes CLOSED mean : {mean_closed:.3f}")
@@ -139,6 +140,7 @@ if calibrate_mode:
     print(f"\n  Applied settings:")
     print(f"    THRESHOLD  = {threshold}")
     print(f"    HYSTERESIS = {hysteresis}")
+    print(f"    CONFIRM    = {confirm_count}")
 
     # Self-update: write new threshold values back into this file
     this_file = os.path.abspath(__file__)
@@ -146,6 +148,7 @@ if calibrate_mode:
         code = f.read()
     code = re.sub(r"THRESHOLD\s*=\s*[\d.]+",  f"THRESHOLD  = {threshold}",  code)
     code = re.sub(r"HYSTERESIS\s*=\s*[\d.]+", f"HYSTERESIS = {hysteresis}", code)
+    code = re.sub(r"CONFIRM_COUNT\s*=\s*\d+", f"CONFIRM_COUNT = {confirm_count}", code)
     with open(this_file, "w", encoding="utf-8") as f:
         f.write(code)
     print("\n  serial-read-alpha.py updated.")
@@ -172,9 +175,19 @@ current_command  = "stop"   # persists through the dead band
 pending_command  = "stop"   # candidate that must be confirmed
 pending_count    = 0        # how many consecutive readings support pending
 samples_since_update = 0    # counts toward next evaluation
+zone_first_seen_time = None  # when current pending zone was first detected
 
 go_line   = THRESHOLD + HYSTERESIS
 stop_line = THRESHOLD - HYSTERESIS
+
+_win_s = window_size / sampling_rate
+print(f"\nLatency budget (estimates):")
+print(f"  Window averaging : ~{_win_s/2:.1f}s  (buffer={_win_s:.1f}s, signal fills half on average)")
+print(f"  Evaluation rate  :  up to {UPDATE_EVERY/sampling_rate:.1f}s")
+print(f"  Confirmation     :  {CONFIRM_COUNT} × {UPDATE_EVERY/sampling_rate:.1f}s = {CONFIRM_COUNT * UPDATE_EVERY/sampling_rate:.1f}s")
+print(f"  File IPC polling :  up to 0.2s")
+print(f"  ─────────────────────────────────────────")
+print(f"  Est. total       : ~{_win_s/2 + CONFIRM_COUNT * UPDATE_EVERY/sampling_rate + 0.2:.1f}s  (measured below)\n")
 
 plt.ion()
 fig, ax = plt.subplots(figsize=(10, 4))
@@ -244,8 +257,8 @@ try:
             zone = "hold"
 
         # Confirmation: only count toward a change when the zone differs from
-        # the current command. If we are already in the right state, reset the
-        # pending counter so it starts fresh on the next potential change.
+        # the current command. If the separation is weak, keep the reaction
+        # fast by using fewer consecutive samples before switching.
         if zone == "hold":
             pending_count = 0
         elif zone == current_command:
@@ -257,12 +270,17 @@ try:
             if zone == pending_command:
                 pending_count += 1
             else:
-                pending_command = zone
-                pending_count   = 1
+                pending_command      = zone
+                pending_count        = 1
+                zone_first_seen_time = time.time()  # start latency clock
 
-            if pending_count >= CONFIRM_COUNT:
-                current_command = zone
-                pending_count   = 0
+            required_confirm = CONFIRM_COUNT
+            if pending_count >= required_confirm:
+                det_lag = time.time() - zone_first_seen_time if zone_first_seen_time else 0
+                print(f"  >> {zone.upper()} confirmed — EEG detection lag: {det_lag:.1f}s")
+                current_command      = zone
+                pending_count        = 0
+                zone_first_seen_time = None
 
         confirm_str = (f"{pending_count}/{CONFIRM_COUNT}"
                        if zone not in ("hold",) and zone != current_command
