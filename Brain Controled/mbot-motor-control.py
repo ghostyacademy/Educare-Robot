@@ -5,7 +5,7 @@ import serial
 import time
 import os
 
-serial_port  = "COM15"
+serial_port  = "COM13"
 baudrate     = 115200
 COMMAND_FILE = r"C:\Users\USER\Desktop\Educare-Robot\Brain Controled\motor_command.txt"
 
