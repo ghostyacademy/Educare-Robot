@@ -7,9 +7,9 @@
 [![Arduino](https://img.shields.io/badge/Arduino-Uno%20R3-00979D?style=flat-square&logo=arduino&logoColor=white)](https://www.arduino.cc/)
 [![Python](https://img.shields.io/badge/Python-3.9+-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
-[![Educare-Robot](https://img.shields.io/badge/Projet-Educare--Robot%202025-0D8FBF?style=flat-square)](https://github.com/)
+[![Educare-Robot](https://img.shields.io/badge/Projet-Educare--Robot%202025-0D8FBF?style=flat-square)](https://github.com/ghostyacademy/Educare-Robot)
 
-*Un système d'interface cerveau-machine (BCI) basé sur l'électro-oculographie (EOG)*
+*Une interface humain-machine basée sur l'électro-oculographie (EOG)*
 
 </div>
 
@@ -48,11 +48,15 @@ Yeux  →  Électrodes EOG  →  Arduino  →  Python Bridge  →  mBot 1
 ## 🗂️ Structure du projet
 
 ```
-Brain Controled/
-├── eog_arduino.ino          # Sketch Arduino — lecture EOG & détection des gestes
+eog-controller/
+├── eog_arduino/
+│   └── eog_arduino.ino      # Sketch Arduino — lecture EOG & détection des gestes
 ├── serial-read-eog.py       # Pont Arduino → fichier commande (+ mode calibration)
-├── mbot-motor-control.py    # Fichier commande → paquets moteur mBot
-└── motor_command.txt        # Généré automatiquement au lancement (IPC)
+├── serial-read-alpha.py     # Variante expérimentale : ondes alpha EEG (8–12 Hz)
+├── mbot-motor-control.py    # Fichier commande → paquets moteur mBot (+ watchdog)
+├── _run_eog_reader.bat      # Lanceur Windows du lecteur EOG
+├── _run_robot_ctrl.bat      # Lanceur Windows du contrôleur mBot
+└── motor_command.txt        # Généré à l'exécution (IPC) — non versionné
 ```
 
 ---
@@ -69,14 +73,17 @@ Brain Controled/
 ### Installation des dépendances Python
 
 ```bash
-pip install pyserial numpy matplotlib
+pip install -r requirements.txt
 ```
 
 ### Cloner le dépôt
 
 ```bash
-git clone https://github.com/votre-compte/eog-mbot-controller.git
-cd eog-mbot-controller
+git clone https://github.com/ghostyacademy/Educare-Robot.git
+cd Educare-Robot
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
 ```
 
 ---
@@ -106,7 +113,7 @@ Ouvrez le **Gestionnaire de périphériques** Windows → **Ports (COM & LPT)** 
 - Arduino + BioAMP → ex. `COM16`
 - mBot 1 via USB → ex. `COM15`
 
-> Ces numéros varient d'un PC à l'autre. Mettez-les à jour dans `serial-read-eog.py` et `mbot-motor-control.py`.
+> Ces numéros varient d'un PC à l'autre. Passez-les en argument aux scripts (voir [Utilisation](#-utilisation)) — inutile de modifier le code.
 
 ---
 
@@ -121,17 +128,17 @@ La calibration mesure votre valeur de repos et identifie les seuils optimaux.
 python serial-read-eog.py COM16 --calibrate
 
 # 3. Bougez les yeux haut / bas / gauche / droite pendant 30 secondes
-# 4. Notez les valeurs min / max / mean affichées
-# 5. Mettez à jour V_BASELINE et H_BASELINE dans le .ino
+# 4. Notez les seuils recommandés (UP_THRESH…)
+# 5. Mettez à jour UP_THRESH / DOWN_THRESH dans eog_arduino/eog_arduino.ino
 # 6. Remettez CALIBRATE_MODE false et ré-uploadez
 ```
+
+> La baseline (valeur de repos) est mesurée automatiquement au démarrage de l'Arduino (50 échantillons) puis ajustée en continu. **Gardez le regard droit devant pendant la première demi-seconde** après le reset.
 
 ### Paramètres Arduino
 
 | Paramètre | Défaut | Description |
 |---|:---:|---|
-| `V_BASELINE` | 512 | Valeur ADC de repos — canal vertical |
-| `H_BASELINE` | 506 | Valeur ADC de repos — canal horizontal |
 | `UP_THRESH` | 90 | Déviation minimale pour valider "Haut" |
 | `DOWN_THRESH` | 90 | Déviation minimale pour valider "Bas" |
 | `CONFIRM_SAMPLES` | 5 | Échantillons consécutifs requis avant émission |
@@ -142,13 +149,13 @@ python serial-read-eog.py COM16 --calibrate
 
 ## 🚀 Utilisation
 
-Ouvrez **deux terminaux séparés** dans le dossier `Brain Controled/` :
+Ouvrez **deux terminaux séparés** dans le dossier `eog-controller/` :
 
 **Terminal 1 — Contrôleur mBot (lancer en premier)**
 
 ```bash
-cd "C:\Users\USER\Desktop\Educare-Robot\Brain Controled"
-python mbot-motor-control.py
+cd eog-controller
+python mbot-motor-control.py COM15
 # → Connecte au mBot sur COM15
 ```
 
@@ -158,6 +165,14 @@ python mbot-motor-control.py
 python serial-read-eog.py COM16
 # → Connecte a COM16 a 115200 baud
 ```
+
+Sous Windows, vous pouvez aussi double-cliquer sur `_run_robot_ctrl.bat` puis `_run_eog_reader.bat`, ou les lancer avec le port en argument : `_run_robot_ctrl.bat COM15`.
+
+### 🛡️ Sécurité — watchdog
+
+Le lecteur EOG réécrit `motor_command.txt` toutes les 200 ms (heartbeat). Si le contrôleur ne reçoit plus de heartbeat pendant **1 seconde** (lecteur planté, Arduino débranché, fenêtre fermée…), il **arrête le mBot**.
+
+Après un arrêt watchdog, le robot ne repart pas tout seul : regardez **en BAS** puis **en HAUT** pour relancer.
 
 ---
 
@@ -175,10 +190,12 @@ python serial-read-eog.py COM16
 [3] serial-read-eog.py
     └─ Reçoit "Up" ou "Down"
     └─ Écrit "go" ou "stop" (+ timestamp) dans motor_command.txt
+    └─ Réécrit le fichier toutes les 200 ms (heartbeat)
 
 [4] mbot-motor-control.py
     └─ Interroge motor_command.txt à 20 Hz
     └─ Envoie le paquet Makeblock via USB dès un changement détecté
+    └─ Arrête le robot si le timestamp a plus d'1 s (watchdog)
 
 [5] mBot 1
     └─ Exécute l'ordre moteur : ports 0x09 (gauche) et 0x0A (droit), vitesse ±150
@@ -214,9 +231,7 @@ BLINK_TOGGLE = True   # Un clignement lent bascule GO ↔ STOP
 Dans `mbot-motor-control.py` (valeur entre 0 et 255) :
 
 ```python
-def avancer(bot):
-    run_motor(bot, 0x09, -200)   # Augmenter pour aller plus vite
-    run_motor(bot, 0x0A,  200)
+SPEED = 200   # Augmenter pour aller plus vite
 ```
 
 ---
@@ -226,10 +241,11 @@ def avancer(bot):
 | Symptôme | Cause probable | Solution |
 |---|---|---|
 | Faux gestes en continu | Seuils trop bas ou électrodes mal posées | Augmentez `UP/DOWN_THRESH`. Nettoyez la peau et relancez la calibration. |
-| "Up" jamais détecté | Électrodes inversées ou `V_BASELINE` incorrect | Vérifiez la polarité A0+/A0−. Relancez la calibration. |
+| "Up" jamais détecté | Électrodes inversées ou baseline faussée au démarrage | Vérifiez la polarité A0+/A0−. Resettez l'Arduino en regardant droit devant. |
 | Une seule roue tourne | Paquets moteur trop rapprochés | Vérifiez le délai 20 ms dans `run_motor()`. Augmentez la vitesse à 200. |
 | mBot ne répond pas | Mauvais port COM ou IDE Arduino ouvert | Vérifiez COM15. Fermez l'IDE Arduino (libère le port). |
-| Lag > 2 secondes | `motor_command.txt` dans un mauvais dossier | Vérifiez que `COMMAND_FILE` est identique dans les deux scripts Python. |
+| `WATCHDOG → pas de heartbeat` | Lecteur EOG arrêté ou Arduino muet | Vérifiez que `serial-read-eog.py` tourne et que l'Arduino est branché. Les deux scripts doivent être dans le même dossier. |
+| `ModuleNotFoundError` ou `serial.Serial` introuvable | Le paquet `serial` (différent de `pyserial`) est installé | `pip uninstall serial` puis `pip install pyserial`. |
 | Signal fixe V=512 | BioAMP mal alimenté ou électrodes débranchées | Vérifiez l'alimentation 3.3V/5V du BioAMP et toutes les connexions. |
 
 ---
@@ -243,6 +259,7 @@ def avancer(bot):
 | pyserial | Chris Liechti | BSD License |
 | numpy | NumPy Developers | BSD License |
 | matplotlib | Matplotlib Developers | BSD License |
+| scipy | SciPy Developers | BSD License |
 | Arduino IDE | Arduino LLC | GPL v2 |
 
 ---
@@ -255,6 +272,6 @@ Ce projet est distribué sous licence **MIT**. Voir le fichier [LICENSE](LICENSE
 
 <div align="center">
 
-*Projet Educare-Robot — 2025 — Tous droits réservés*
+*Projet Educare-Robot — 2025*
 
 </div>
