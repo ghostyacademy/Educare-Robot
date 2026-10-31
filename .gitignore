@@ -1,0 +1,8 @@
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# Fichier IPC genere a l'execution
+motor_command.txt
+motor_command.txt.tmp
